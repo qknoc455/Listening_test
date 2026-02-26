@@ -32,7 +32,6 @@ def read_sheet():
 
 def append_row(row_dict):
     sheet = get_sheet()
-    # 如果表格是空的，先寫入標題列
     if sheet.row_count == 0 or sheet.cell(1, 1).value == "":
         sheet.append_row(["Timestamp", "User_ID", "Test_Group", "File", "Choice", "Winner"])
     sheet.append_row([
@@ -68,13 +67,23 @@ def load_files(test_type):
 
     paired_data = []
     for f in files:
-        target_file = os.path.join(path2, f)
-        if os.path.exists(target_file):
-            paired_data.append({
-                "file_name": f,
-                "path_1": os.path.join(path1, f), "label_1": folder1,
-                "path_2": target_file,             "label_2": folder2
-            })
+        base = os.path.splitext(f)[0]  # e.g. S50046
+        ext  = os.path.splitext(f)[1]  # e.g. .wav
+        # 嘗試原檔名，再嘗試加 _mix 的檔名
+        candidate1 = os.path.join(path2, f)
+        candidate2 = os.path.join(path2, f"{base}_mix{ext}")
+        if os.path.exists(candidate1):
+            target_file = candidate1
+        elif os.path.exists(candidate2):
+            target_file = candidate2
+        else:
+            continue
+
+        paired_data.append({
+            "file_name": f,
+            "path_1": os.path.join(path1, f), "label_1": folder1,
+            "path_2": target_file,             "label_2": folder2
+        })
     return paired_data
 
 # --- 3. 初始化 Session State ---

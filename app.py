@@ -116,7 +116,7 @@ if not st.session_state.user_id:
 else:
     st.write(f"當前測試者: **{st.session_state.user_id}**")
 
-    test_options = ["baseline_LLM", "DNSMOS_LLM", "Noisy_LLM"]
+    test_options = ["baseline_LLM", "DNSMIOS_LLM", "Noisy_LLM"]
     selected_test = st.selectbox(
         "請選擇目前的測試組別：", test_options,
         on_change=lambda: st.session_state.update(current_idx=0, shuffled=False)

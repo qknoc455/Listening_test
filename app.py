@@ -30,6 +30,24 @@ def read_sheet():
         columns=["Timestamp", "User_ID", "Test_Group", "File", "Choice", "Winner"]
     )
 
+def get_used_user_ids():
+    """從 Google Sheets 取得已使用的 user 編號"""
+    try:
+        df = read_sheet()
+        if df.empty or "User_ID" not in df.columns:
+            return set()
+        ids = df["User_ID"].unique()
+        # 取出數字部分，e.g. "user3" -> 3
+        nums = set()
+        for uid in ids:
+            try:
+                nums.add(int(str(uid).replace("user", "")))
+            except:
+                pass
+        return nums
+    except:
+        return set()
+
 def append_row(row_dict):
     sheet = get_sheet()
     if sheet.row_count == 0 or sheet.cell(1, 1).value == "":
@@ -42,6 +60,18 @@ def append_row(row_dict):
         row_dict["Choice"],
         row_dict["Winner"]
     ])
+
+def delete_last_row_for_user(user_id, test_group):
+    """刪除該使用者在該組別的最後一筆記錄（用於回上一題）"""
+    sheet = get_sheet()
+    all_values = sheet.get_all_values()
+    # 從最後一列往上找
+    for i in range(len(all_values) - 1, 0, -1):
+        row = all_values[i]
+        if len(row) >= 3 and row[1] == user_id and row[2] == test_group:
+            sheet.delete_rows(i + 1)  # gspread 是 1-indexed
+            return True
+    return False
 
 # --- 2. 功能函式：自動配對檔案 ---
 def load_files(test_type):
@@ -67,9 +97,8 @@ def load_files(test_type):
 
     paired_data = []
     for f in files:
-        base = os.path.splitext(f)[0]  # e.g. S50046
-        ext  = os.path.splitext(f)[1]  # e.g. .wav
-        # 嘗試原檔名，再嘗試加 _mix 的檔名
+        base = os.path.splitext(f)[0]
+        ext  = os.path.splitext(f)[1]
         candidate1 = os.path.join(path2, f)
         candidate2 = os.path.join(path2, f"{base}_mix{ext}")
         if os.path.exists(candidate1):
@@ -117,9 +146,14 @@ st.title("🎧 語音品質主觀聽測 (AB Test)")
 if not st.session_state.user_id:
     st.info("請輸入您的受測者編號以開始測試。")
     user_num = st.number_input("受測者編號 (例如輸入 1 會記錄為 user1)", min_value=1, max_value=100, step=1)
+
     if st.button("確認並進入測試"):
-        st.session_state.user_id = f"user{int(user_num)}"
-        st.rerun()
+        used_ids = get_used_user_ids()
+        if int(user_num) in used_ids:
+            st.error(f"編號 {int(user_num)} 已被使用，請選擇其他編號。")
+        else:
+            st.session_state.user_id = f"user{int(user_num)}"
+            st.rerun()
 
 # 步驟 B: 進行測試
 else:
@@ -184,6 +218,17 @@ else:
             save_and_next("Tie", "None")
         if c3.button("B 較好 ➡️", use_container_width=True):
             save_and_next("B", b_lab)
+
+        # 回上一題按鈕
+        st.markdown("---")
+        if st.session_state.current_idx > 0:
+            if st.button("↩️ 回上一題"):
+                try:
+                    delete_last_row_for_user(st.session_state.user_id, selected_test)
+                except Exception as e:
+                    st.error(f"刪除記錄失敗: {e}")
+                st.session_state.current_idx -= 1
+                st.rerun()
 
     elif len(data) > 0:
         st.balloons()

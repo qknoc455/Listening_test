@@ -30,21 +30,12 @@ def read_sheet():
         columns=["Timestamp", "User_ID", "Test_Group", "File", "Choice", "Winner"]
     )
 
-def get_used_user_ids():
-    """從 Google Sheets 取得已使用的 user 編號"""
+def get_used_names():
     try:
         df = read_sheet()
         if df.empty or "User_ID" not in df.columns:
             return set()
-        ids = df["User_ID"].unique()
-        # 取出數字部分，e.g. "user3" -> 3
-        nums = set()
-        for uid in ids:
-            try:
-                nums.add(int(str(uid).replace("user", "")))
-            except:
-                pass
-        return nums
+        return set(df["User_ID"].unique())
     except:
         return set()
 
@@ -62,14 +53,12 @@ def append_row(row_dict):
     ])
 
 def delete_last_row_for_user(user_id, test_group):
-    """刪除該使用者在該組別的最後一筆記錄（用於回上一題）"""
     sheet = get_sheet()
     all_values = sheet.get_all_values()
-    # 從最後一列往上找
     for i in range(len(all_values) - 1, 0, -1):
         row = all_values[i]
         if len(row) >= 3 and row[1] == user_id and row[2] == test_group:
-            sheet.delete_rows(i + 1)  # gspread 是 1-indexed
+            sheet.delete_rows(i + 1)
             return True
     return False
 
@@ -115,15 +104,31 @@ def load_files(test_type):
         })
     return paired_data
 
+def build_combined_test(user_id):
+    """
+    合併兩組測試：
+    前 10 題來自 baseline_LLM，後 10 題來自 DNSMIOS_LLM
+    """
+    combined = []
+    for group in ["baseline_LLM", "DNSMIOS_LLM"]:
+        trials = load_files(group)
+        random.seed(f"{user_id}_{group}_order")
+        random.shuffle(trials)
+        trials = trials[:10]
+        for t in trials:
+            t["test_group"] = group
+        combined.extend(trials)
+    return combined
+
 # --- 3. 初始化 Session State ---
-if 'user_id'     not in st.session_state: st.session_state.user_id     = ""
+if 'user_id'     not in st.session_state: st.session_state.user_id    = ""
 if 'current_idx' not in st.session_state: st.session_state.current_idx = 0
 if 'test_data'   not in st.session_state: st.session_state.test_data   = []
-if 'shuffled'    not in st.session_state: st.session_state.shuffled    = False
+if 'test_ready'  not in st.session_state: st.session_state.test_ready  = False
 
 # --- 4. 側邊欄：管理員後台 ---
 with st.sidebar:
-    st.title("⚙️ 管理員後台")
+    st.title("管理員後台")
     if st.checkbox("開啟數據統計"):
         pw = st.text_input("輸入密碼", type="password")
         if pw == "1234":
@@ -140,43 +145,43 @@ with st.sidebar:
                 st.error(f"讀取失敗: {e}")
 
 # --- 5. 主介面流程 ---
-st.title("🎧 語音品質主觀聽測 (AB Test)")
+st.title("語音品質主觀聽測 (AB Test)")
 
-# 步驟 A: 身分確認
+# 步驟 A: 填寫名字
 if not st.session_state.user_id:
-    st.info("請輸入您的受測者編號以開始測試。")
-    user_num = st.number_input("受測者編號 (例如輸入 1 會記錄為 user1)", min_value=1, max_value=100, step=1)
+    st.info("請輸入您的姓名以開始測試。")
+    name_input = st.text_input("姓名")
 
     if st.button("確認並進入測試"):
-        used_ids = get_used_user_ids()
-        if int(user_num) in used_ids:
-            st.error(f"編號 {int(user_num)} 已被使用，請選擇其他編號。")
+        name = name_input.strip()
+        if not name:
+            st.error("姓名不能為空白，請輸入您的姓名。")
         else:
-            st.session_state.user_id = f"user{int(user_num)}"
-            st.rerun()
+            used_names = get_used_names()
+            if name in used_names:
+                st.error(f"「{name}」已參加過測試，請確認姓名是否正確。")
+            else:
+                st.session_state.user_id = name
+                st.session_state.test_data = build_combined_test(name)
+                st.session_state.test_ready = True
+                st.rerun()
 
 # 步驟 B: 進行測試
 else:
-    st.write(f"當前測試者: **{st.session_state.user_id}**")
-
-    test_options = ["baseline_LLM", "DNSMIOS_LLM", "Noisy_LLM"]
-    selected_test = st.selectbox(
-        "請選擇目前的測試組別：", test_options,
-        on_change=lambda: st.session_state.update(current_idx=0, shuffled=False)
-    )
-
-    if not st.session_state.shuffled:
-        st.session_state.test_data = load_files(selected_test)
-        random.shuffle(st.session_state.test_data)
-        st.session_state.shuffled = True
+    st.write(f"受測者：**{st.session_state.user_id}**")
 
     data = st.session_state.test_data
+    total = len(data)
 
-    if data and st.session_state.current_idx < len(data):
+    if data and st.session_state.current_idx < total:
         trial = data[st.session_state.current_idx]
-        st.subheader(f"進度：{st.session_state.current_idx + 1} / {len(data)}")
+        current_group = trial["test_group"]
+        idx = st.session_state.current_idx
 
-        random.seed(f"{st.session_state.user_id}_{selected_test}_{st.session_state.current_idx}")
+        section = "第一部分 (1-10題)" if idx < 10 else "第二部分 (11-20題)"
+        st.subheader(f"進度：{idx + 1} / {total}　　{section}")
+
+        random.seed(f"{st.session_state.user_id}_{current_group}_{idx}")
         swapped = random.choice([True, False])
 
         a_path = trial['path_2'] if swapped else trial['path_1']
@@ -193,14 +198,14 @@ else:
             st.audio(b_path)
 
         st.markdown("---")
-        st.write("💡 **哪一個聲音品質較好？**")
+        st.write("哪一個聲音品質較好？")
         c1, c2, c3 = st.columns(3)
 
         def save_and_next(choice_label, winner_name):
             new_row = {
                 "Timestamp":  datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                 "User_ID":    st.session_state.user_id,
-                "Test_Group": selected_test,
+                "Test_Group": current_group,
                 "File":       trial['file_name'],
                 "Choice":     choice_label,
                 "Winner":     winner_name
@@ -212,28 +217,24 @@ else:
             st.session_state.current_idx += 1
             st.rerun()
 
-        if c1.button("⬅️ A 較好", use_container_width=True):
+        if c1.button("A 較好", use_container_width=True):
             save_and_next("A", a_lab)
         if c2.button("無明顯差異", use_container_width=True):
             save_and_next("Tie", "None")
-        if c3.button("B 較好 ➡️", use_container_width=True):
+        if c3.button("B 較好", use_container_width=True):
             save_and_next("B", b_lab)
 
-        # 回上一題按鈕
         st.markdown("---")
         if st.session_state.current_idx > 0:
-            if st.button("↩️ 回上一題"):
+            if st.button("回上一題"):
+                prev_trial = data[st.session_state.current_idx - 1]
                 try:
-                    delete_last_row_for_user(st.session_state.user_id, selected_test)
+                    delete_last_row_for_user(st.session_state.user_id, prev_trial["test_group"])
                 except Exception as e:
                     st.error(f"刪除記錄失敗: {e}")
                 st.session_state.current_idx -= 1
                 st.rerun()
 
-    elif len(data) > 0:
+    elif total > 0:
         st.balloons()
-        st.success("本組測試已完成！您的選擇已自動存入雲端表格。")
-        if st.button("切換組別或重新開始"):
-            st.session_state.current_idx = 0
-            st.session_state.shuffled    = False
-            st.rerun()
+        st.success("測試完成！感謝您的參與，您的答案已自動儲存。")

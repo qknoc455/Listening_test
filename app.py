@@ -62,7 +62,31 @@ def delete_last_row_for_user(user_id, test_group):
             return True
     return False
 
-# --- 2. 功能函式：自動配對檔案 ---
+# --- 2. 統計圖表函式 ---
+def show_group_stats(df, group_name):
+    df_group = df[df["Test_Group"] == group_name]
+    if df_group.empty:
+        st.info(f"{group_name}：尚無資料")
+        return
+
+    total  = len(df_group)
+    counts = df_group["Winner"].value_counts()
+    pct    = (counts / total * 100).round(1)
+
+    # 整理表格
+    stat_df = pd.DataFrame({
+        "勝利筆數": counts,
+        "勝率 (%)": pct,
+        "總筆數":   total
+    }).fillna(0)
+    stat_df["勝利筆數"] = stat_df["勝利筆數"].astype(int)
+    stat_df.index.name = "方法"
+
+    st.markdown(f"**{group_name}**　（共 {total} 筆）")
+    st.bar_chart(pct)
+    st.dataframe(stat_df, use_container_width=True)
+
+# --- 3. 功能函式：自動配對檔案 ---
 def load_files(test_type):
     base_path = f"data/{test_type}"
     if not os.path.exists(base_path):
@@ -105,10 +129,6 @@ def load_files(test_type):
     return paired_data
 
 def build_combined_test(user_id):
-    """
-    合併兩組測試：
-    前 10 題來自 baseline_LLM，後 10 題來自 DNSMIOS_LLM
-    """
     combined = []
     for group in ["baseline_LLM", "DNSMIOS_LLM"]:
         trials = load_files(group)
@@ -120,13 +140,13 @@ def build_combined_test(user_id):
         combined.extend(trials)
     return combined
 
-# --- 3. 初始化 Session State ---
-if 'user_id'     not in st.session_state: st.session_state.user_id    = ""
+# --- 4. 初始化 Session State ---
+if 'user_id'     not in st.session_state: st.session_state.user_id     = ""
 if 'current_idx' not in st.session_state: st.session_state.current_idx = 0
 if 'test_data'   not in st.session_state: st.session_state.test_data   = []
 if 'test_ready'  not in st.session_state: st.session_state.test_ready  = False
 
-# --- 4. 側邊欄：管理員後台 ---
+# --- 5. 側邊欄：管理員後台 ---
 with st.sidebar:
     st.title("管理員後台")
     if st.checkbox("開啟數據統計"):
@@ -135,16 +155,20 @@ with st.sidebar:
             try:
                 existing_data = read_sheet()
                 if not existing_data.empty:
-                    st.success(f"目前累計受測人數: {existing_data['User_ID'].nunique()}")
-                    st.subheader("勝率分佈 (Winner Count)")
-                    st.bar_chart(existing_data['Winner'].value_counts())
-                    st.dataframe(existing_data)
+                    st.success(f"累計受測人數：{existing_data['User_ID'].nunique()} 人")
+                    st.markdown("---")
+                    show_group_stats(existing_data, "baseline_LLM")
+                    st.markdown("---")
+                    show_group_stats(existing_data, "DNSMIOS_LLM")
+                    st.markdown("---")
+                    st.subheader("原始資料")
+                    st.dataframe(existing_data, use_container_width=True)
                 else:
                     st.info("目前雲端表格內沒有任何資料。")
             except Exception as e:
                 st.error(f"讀取失敗: {e}")
 
-# --- 5. 主介面流程 ---
+# --- 6. 主介面流程 ---
 st.title("語音品質主觀聽測 (AB Test)")
 
 # 步驟 A: 填寫名字
@@ -161,7 +185,7 @@ if not st.session_state.user_id:
             if name in used_names:
                 st.error(f"「{name}」已參加過測試，請確認姓名是否正確。")
             else:
-                st.session_state.user_id = name
+                st.session_state.user_id   = name
                 st.session_state.test_data = build_combined_test(name)
                 st.session_state.test_ready = True
                 st.rerun()
@@ -170,13 +194,13 @@ if not st.session_state.user_id:
 else:
     st.write(f"受測者：**{st.session_state.user_id}**")
 
-    data = st.session_state.test_data
+    data  = st.session_state.test_data
     total = len(data)
 
     if data and st.session_state.current_idx < total:
-        trial = data[st.session_state.current_idx]
+        trial         = data[st.session_state.current_idx]
         current_group = trial["test_group"]
-        idx = st.session_state.current_idx
+        idx           = st.session_state.current_idx
 
         section = "第一部分 (1-10題)" if idx < 10 else "第二部分 (11-20題)"
         st.subheader(f"進度：{idx + 1} / {total}　　{section}")

@@ -20,7 +20,7 @@ def get_sheet():
     client = gspread.authorize(creds)
     sheet = client.open_by_url(
         "https://docs.google.com/spreadsheets/d/1U5kSbSjD4bLdARc_AQeSXngz0YgPUV7pJhe8CLdUtic/edit?gid=0#gid=0"
-    ).worksheet("listening_AB_test_results")
+    ).sheet1
     return sheet
 
 def read_sheet():
